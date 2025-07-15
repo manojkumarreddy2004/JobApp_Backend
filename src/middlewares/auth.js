@@ -1,20 +1,25 @@
 import jwt from 'jsonwebtoken';
-
+import { handleResponse } from '../utils/responseHandler.js';
+import redis from '../config/redis.js';
+import buildCacheKey from '../utils/cacheKeyBuilder.js';
 const jwt_secret = process.env.JWT_SECRET || "Hello This is MY APP";
 
 // authenticate User by verifying JWT token recieved from user middleware
-export const authenticate = (req, res, next)=>{
+export const authenticate = async (req, res, next)=>{
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")){
-        return res.status(401).json({message:"Unauthorized"});        
+        return handleResponse(res, 401, "No Token Provided (Login to Get Token)");
     }
+    const token = authHeader.split(" ")[1];
+    const blacklisted = await redis.get(buildCacheKey("blacklist", token));
+    if (blacklisted) return handleResponse(res, 401, "Invalid Token: Token Blacklisted");
+
     try{
-        const token = authHeader.split(" ")[1];
         const decoded = jwt.verify(token, jwt_secret);
         req.user = decoded;
         next();
     }catch(error){
-        return res.status(401).json({message:`${error}`});
+        return handleResponse(res, 401, error.message);
     }
 }
 
@@ -22,7 +27,7 @@ export const authenticate = (req, res, next)=>{
 export const authorizeRoles = (...roles)=>{
     return (req, res, next)=>{
         if (!roles.includes(req.user.role)){
-            return res.status(403).json({message:"Access Denied: You are not authorized to perform this action"});
+            return handleResponse(res, 403, "Access Denied: You are not authorized to perform this action");
         }
         next();
     }
